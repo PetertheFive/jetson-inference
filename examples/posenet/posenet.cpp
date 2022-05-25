@@ -27,6 +27,17 @@
 
 #include <signal.h>
 
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
+using namespace cv;
+using namespace std;
+
+const int endPos=820;
+const int startPos=220;
+const int scaleUp = 600;
+const int cutLimit = 100 - (10000/scaleUp) ;
 
 bool signal_recieved = false;
 
@@ -67,7 +78,16 @@ int main( int argc, char** argv )
 	if( cmdLine.GetFlag("help") )
 		return usage();
 
-
+	/*
+	 * load Apple logo
+	 */
+	cv::Mat logo,resized_logo;
+	logo = cv::imread("images/apple.jpg", cv::IMREAD_COLOR);
+	if(! logo.data ){// Check for invalid input
+		LogError("detectnet:  failed to load images/apple.jpg\n");
+        	return -1;
+    	}
+ 
 	/*
 	 * attach signal handler
 	 */
@@ -90,11 +110,11 @@ int main( int argc, char** argv )
 	/*
 	 * create output stream
 	 */
-	videoOutput* output = videoOutput::Create(cmdLine, ARG_POSITION(1));
+/*	videoOutput* output = videoOutput::Create(cmdLine, ARG_POSITION(1));
 	
 	if( !output )
 		LogError("posenet: failed to create output stream\n");	
-	
+*/	
 
 	/*
 	 * create recognition network
@@ -111,6 +131,17 @@ int main( int argc, char** argv )
 	const uint32_t overlayFlags = poseNet::OverlayFlagsFromStr(cmdLine.GetString("overlay", "links,keypoints"));
 	
 	
+	//Rex:Show a initial screen
+    	namedWindow( "Logo", WINDOW_NORMAL );
+	setWindowProperty ("Logo", WND_PROP_FULLSCREEN, WINDOW_FULLSCREEN);
+    	imshow( "Logo", logo );
+	waitKey(33);
+    	imshow( "Logo", logo );
+	waitKey(33);
+    	imshow( "Logo", logo );
+	waitKey(33);
+
+	int resetCounter = 100;
 	/*
 	 * processing loop
 	 */
@@ -139,9 +170,9 @@ int main( int argc, char** argv )
 		}
 		
 		LogInfo("posenet: detected %zu %s(s)\n", poses.size(), net->GetCategory());
-		
+
 		// render outputs
-		if( output != NULL )
+/*		if( output != NULL )
 		{
 			output->Render(image, input->GetWidth(), input->GetHeight());
 
@@ -153,6 +184,57 @@ int main( int argc, char** argv )
 			// check if the user quit
 			if( !output->IsStreaming() )
 				signal_recieved = true;
+		}
+*/
+
+		if ( (poses.size()==0) && (resetCounter>0) ) {
+			if(--resetCounter == 0) {
+				LogVerbose("percent reset\n");
+    				imshow( "Logo", logo );
+				waitKey(33);
+    				imshow( "Logo", logo );
+				waitKey(33);
+    				imshow( "Logo", logo );
+				waitKey(33);
+			}
+		}	
+
+		for(std::vector<poseNet::ObjectPose>::iterator pose=poses.begin(); pose!=poses.end(); ++pose)
+		{
+			int leftShoulder = pose->FindKeypoint(5);
+			int rightShoulder = pose->FindKeypoint(6);
+			/*int leftElbow = pose->FindKeypoint(7);
+			int leftWrist = pose->FindKeypoint(9);
+			int rightElbow = pose->FindKeypoint(8);
+			int rightWrist = pose->FindKeypoint(10);
+			int leftHip = pose->FindKeypoint(11);
+			int rightHip = pose->FindKeypoint(12);
+			int leftKnee = pose->FindKeypoint(13);
+			int leftAnkle = pose->FindKeypoint(15);
+			int rightKnee = pose->FindKeypoint(14);
+			int rightAnkle = pose->FindKeypoint(16);*/
+
+			if((leftShoulder!=-1) && (rightShoulder!=-1)) {
+				resetCounter = 100;
+				int middleOfShoulder = (pose->Keypoints[leftShoulder].x + pose->Keypoints[rightShoulder].x)/2;
+				if(middleOfShoulder > endPos)
+					middleOfShoulder = endPos;
+				else if(middleOfShoulder < startPos)
+					middleOfShoulder = startPos;
+				LogVerbose("outform: shoulder = %f, %f, middleOfShoulder=%d", pose->Keypoints[leftShoulder].x, pose->Keypoints[rightShoulder].x, middleOfShoulder);
+				int cutOff = (middleOfShoulder-startPos) * 100 / (endPos-startPos) * cutLimit/ 100;
+                                //LogVerbose("cutOff = %d\n", cutOff);
+                                if(cutOff<1) cutOff=1;
+				else if(cutOff>99) cutOff=99;
+				Mat croppedImage = logo(Rect( (1920-(1920*(100-cutOff)/100))/2, (1080-(1080*(100-cutOff)/100))/2, (1920*(100-cutOff)/100), (1080*(100-cutOff)/100) ));
+				//LogVerbose("cutOff=%d, Rec(%d, %d)  (%d, %d) \n", cutOff, (1920-(1920*(100-cutOff)/100))/2, (1080-(1080*(100-cutOff)/100))/2, (1920*(100-cutOff)/100), (1080*(100-cutOff)/100));
+				
+	    			// Create a window for display.
+                                imshow( "Logo", croppedImage );
+                              // Show our image inside it.
+                                waitKey(1);
+				break;
+			}
 		}
 
 		// print out timing info
@@ -166,7 +248,7 @@ int main( int argc, char** argv )
 	LogVerbose("posenet: shutting down...\n");
 	
 	SAFE_DELETE(input);
-	SAFE_DELETE(output);
+//	SAFE_DELETE(output);
 	SAFE_DELETE(net);
 	
 	LogVerbose("posenet: shutdown complete.\n");
